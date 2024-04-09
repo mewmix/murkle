@@ -1,92 +1,91 @@
-import { BigNumber, utils } from 'ethers'
-import BalanceTree from './balance-tree'
+import { BigNumber, utils } from 'ethers';
+import BalanceTree from './balance-tree';
 
-const { isAddress, getAddress } = utils
+const { isAddress, getAddress, parseUnits } = utils;
 
-// This is the blob that gets distributed and pinned to IPFS.
-// It is completely sufficient for recreating the entire merkle tree.
-// Anyone can verify that all air drops are included in the tree,
-// and the tree has no additional distributions.
 interface MerkleDistributorInfo {
-  merkleRoot: string
-  tokenTotal: string
+  merkleRoot: string;
+  tokenTotal: string;
   claims: {
     [account: string]: {
-      index: number
-      amount: string
-      proof: string[]
+      index: number;
+      amount: string;
+      proof: string[];
       flags?: {
-        [flag: string]: boolean
-      }
-    }
-  }
+        [flag: string]: boolean;
+      };
+    };
+  };
 }
 
-type OldFormat = { [account: string]: number | string }
-type NewFormat = { address: string; earnings: string; reasons: string }
+type OldFormat = { [account: string]: number | string; }
+type NewFormat = { address: string; earnings: string; reasons: string; }
+
+interface DataByAddress {
+  [address: string]: {
+    amount: BigNumber;
+    flags?: {
+      [flag: string]: boolean;
+    };
+  };
+}
 
 export function parseBalanceMap(balances: OldFormat | NewFormat[]): MerkleDistributorInfo {
-  // if balances are in an old format, process them
   const balancesInNewFormat: NewFormat[] = Array.isArray(balances)
     ? balances
-    : Object.keys(balances).map(
-        (account): NewFormat => ({
-          address: account,
-          earnings: `0x${balances[account].toString(16)}`,
-          reasons: '',
-        })
-      )
+    : Object.keys(balances).map((account) => ({
+        address: account,
+        // Convert numeric values directly to the smallest unit as a BigNumber, properly handling decimals
+        earnings: parseUnits(balances[account].toString(), 18).toString(),
+        reasons: '',
+      }));
 
-  const dataByAddress = balancesInNewFormat.reduce<{
-    [address: string]: { amount: BigNumber; flags?: { [flag: string]: boolean } }
-  }>((memo, { address: account, earnings, reasons }) => {
-    if (!isAddress(account)) {
-      throw new Error(`Found invalid address: ${account}`)
+  const dataByAddress: DataByAddress = balancesInNewFormat.reduce((memo, { address, earnings, reasons }) => {
+    if (!isAddress(address)) {
+      throw new Error(`Found invalid address: ${address}`);
     }
-    const parsed = getAddress(account)
-    if (memo[parsed]) throw new Error(`Duplicate address: ${parsed}`)
-    const parsedNum = BigNumber.from(earnings)
-    if (parsedNum.lte(0)) throw new Error(`Invalid amount for account: ${account}`)
+    const parsedAddress = getAddress(address);
+    if (memo[parsedAddress]) {
+      throw new Error(`Duplicate address: ${parsedAddress}`);
+    }
+
+    const amount = BigNumber.from(earnings);
+    if (amount.lte(0)) {
+      throw new Error(`Invalid amount for account: ${address}`);
+    }
 
     const flags = {
       isSOCKS: reasons.includes('socks'),
       isLP: reasons.includes('lp'),
       isUser: reasons.includes('user'),
-    }
+    };
 
-    memo[parsed] = { amount: parsedNum, ...(reasons === '' ? {} : { flags }) }
-    return memo
-  }, {})
+    memo[parsedAddress] = { amount, flags: reasons ? flags : undefined };
+    return memo;
+  }, {} as DataByAddress);
 
-  const sortedAddresses = Object.keys(dataByAddress).sort()
+  const sortedAddresses = Object.keys(dataByAddress).sort();
 
-  // construct a tree
   const tree = new BalanceTree(
     sortedAddresses.map((address) => ({ account: address, amount: dataByAddress[address].amount }))
-  )
+  );
 
-  // generate claims
-  const claims = sortedAddresses.reduce<{
-    [address: string]: { amount: string; index: number; proof: string[]; flags?: { [flag: string]: boolean } }
-  }>((memo, address, index) => {
-    const { amount, flags } = dataByAddress[address]
+  const claims = sortedAddresses.reduce((memo, address, index) => {
+    const { amount, flags } = dataByAddress[address];
     memo[address] = {
       index,
       amount: amount.toHexString(),
       proof: tree.getProof(index, address, amount),
-      ...(flags ? { flags } : {}),
-    }
-    return memo
-  }, {})
+      flags,
+    };
+    return memo;
+  }, {} as MerkleDistributorInfo["claims"]);
 
-  const tokenTotal: BigNumber = sortedAddresses.reduce<BigNumber>(
-    (memo, key) => memo.add(dataByAddress[key].amount),
-    BigNumber.from(0)
-  )
+  const tokenTotal = sortedAddresses.reduce((memo, key) => memo.add(dataByAddress[key].amount), BigNumber.from(0));
 
   return {
     merkleRoot: tree.getHexRoot(),
     tokenTotal: tokenTotal.toHexString(),
     claims,
-  }
+  };
 }
