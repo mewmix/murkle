@@ -7,7 +7,7 @@ base_file_path = 'page'
 file_extension = '.csv'
 
 # This will generate a list like: ['export-token-0xCfB24d3C3767364391340a2E6d99c64F1CBd7A3D_page1.csv', ...]
-csv_files = [f"{base_file_path}{i}{file_extension}" for i in range(0, 8)]
+csv_files = [f"{base_file_path}{i}{file_extension}" for i in range(0, 7)]
 
 # Combined data storage
 combined_json_data = {}
