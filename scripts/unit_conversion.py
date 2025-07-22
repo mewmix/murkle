@@ -2,7 +2,7 @@ import json
 from decimal import Decimal
 
 # Path to your input JSON file
-input_file_path = './complex_example.json'
+input_file_path = './mintlayer_final_distro.json'
 # Path to the output JSON file
 output_file_path = './updated_input.json'
 
